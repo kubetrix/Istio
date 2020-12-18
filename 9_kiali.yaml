@@ -1,0 +1,40 @@
+# Source: istio/charts/kiali/templates/configmap.yaml		
+apiVersion: v1		
+kind: ConfigMap		
+metadata:		
+  name: kiali		
+  namespace: istio-system		
+  labels:		
+    app: kiali
+    operator.istio.io/component: AddonComponents
+    operator.istio.io/managed: Reconcile
+    operator.istio.io/version: 1.5.4
+    release: istio
+data:		
+  config.yaml: |
+    istio_component_namespaces:
+      grafana: istio-system
+      tracing: jaeger
+      pilot: istio-system
+      prometheus: istio-system
+    istio_namespace: istio-system
+    auth:
+      strategy: token
+    deployment:
+      accessible_namespaces: ['**']
+    login_token:
+      signing_key: "<xxxxx>"
+    server:
+      port: 20001
+      web_root: /kiali
+    external_services:
+      istio:
+        url_service_version: http://istio-pilot.istio-system:8080/version
+      tracing:
+        url:
+        in_cluster_url: http://jaeger-query.jaeger/jaeger
+      grafana:
+        url: http://grafana.istio-system.svc.cluster.local:3000
+        in_cluster_url: 
+      prometheus:
+        url: http://prometheus.istio-system:9090

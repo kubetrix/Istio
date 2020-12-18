@@ -1,0 +1,682 @@
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+spec:
+  addonComponents:
+    grafana:
+      enabled: true
+      k8s:
+        replicaCount: 1
+        resources: 
+          limits:
+            cpu: 200m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+    kiali:
+      enabled: true
+      k8s:
+        replicaCount: 1
+        resources: 
+          limits:
+            cpu: 200m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+    prometheus:
+      enabled: true
+      k8s:
+        replicaCount: 1
+        resources: 
+          limits:
+            cpu: 500m
+            memory: 2048Mi
+          requests:
+            cpu: 200m
+            memory: 512Mi
+    # Disabled As using external Jaeger Tracing
+    #tracing:
+    #  enabled: false
+    #  k8s:
+    #    replicaCount: 1
+    #    resources: 
+    #      limits:
+    #        cpu: 500m
+    #        memory: 512Mi
+    #      requests:
+    #        cpu: 200m
+    #        memory: 512Mi      
+  components:
+    base:
+      enabled: true
+    citadel:
+      enabled: true 
+      k8s:
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%
+        resources: 
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+    ingressGateways:
+    - enabled: true
+      k8s:
+        env:
+        # A gateway with this mode ensures that pilot generates an additional set of clusters for internal services but without istio mTLS, to  enable cross cluster routing.
+        - name: ISTIO_META_ROUTER_MODE 
+          value: sni-dnat
+        # Setting hpa
+        hpaSpec:
+          minReplicas: 3
+          maxReplicas: 10
+          metrics:
+          - resource:
+              name: cpu
+              targetAverageUtilization: 80
+            type: Resource
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istio-ingressgateway
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 1024Mi
+          requests:
+            cpu: 100m 
+            memory: 128Mi 
+        service:
+          ports:
+          - name: status-port
+            port: 15020
+            targetPort: 15020
+          - name: http2
+            port: 80
+            targetPort: 80
+          - name: https
+            port: 443
+          - name: kiali
+            port: 15029
+            targetPort: 15029
+          - name: prometheus
+            port: 15030
+            targetPort: 15030
+          - name: grafana
+            port: 15031
+            targetPort: 15031
+          - name: tracing
+            port: 15032
+            targetPort: 15032
+          - name: tls
+            port: 15443
+            targetPort: 15443
+          - name: tcp
+            port: 31400
+         # Annotation for istio-ingressgateway loadbalancer IP resource-group location, You can remove it or keep it
+        serviceAnnotations:
+          service.beta.kubernetes.io/azure-load-balancer-resource-group: <LoadBalancerIP-ResourceGroupName>
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%
+      name: istio-ingressgateway
+    egressGateways:
+    - enabled: true
+      k8s:
+        env:
+        - name: ISTIO_META_ROUTER_MODE
+          value: sni-dnat
+        hpaSpec:
+          minReplicas: 3
+          maxReplicas: 5
+          metrics:
+          - resource:
+              name: cpu
+              targetAverageUtilization: 80
+            type: Resource
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istio-egressgateway
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 1024Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        service:
+          ports:
+          - name: status-port
+            port: 15020
+            targetPort: 15020
+          - name: http2
+            port: 80
+            targetPort: 80
+          - name: https
+            port: 443
+          - name: kiali
+            port: 15029
+            targetPort: 15029
+          - name: prometheus
+            port: 15030
+            targetPort: 15030
+          - name: grafana
+            port: 15031
+            targetPort: 15031
+          - name: tracing
+            port: 15032
+            targetPort: 15032
+          - name: tls
+            port: 15443
+            targetPort: 15443            
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%
+      name: istio-egressgateway
+    pilot:
+      enabled: true
+      k8s:
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        - name: GODEBUG
+          value: gctrace=1
+        - name: PILOT_TRACE_SAMPLING
+          value: "1" # Keep value as 1 it is mandatory to have 
+        - name: CONFIG_NAMESPACE
+          value: istio-config
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: 2000m
+            memory: 4096Mi
+          requests:
+            cpu: 500m
+            memory: 2048Mi 
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%
+ #Istio changed the telemetry from old to new Telemetry-V2, This is Telemetry V2 with Wasm runtime required more memory for startup, Keeping this feature enable for unknown metrics, As per istio 1.5+ envoy will handle all the istio specific metrics.           
+    telemetry:
+      enabled: true
+      k8s:
+        env:
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        # No of threads for GO process to run the telemetry in parallel
+        - name: GOMAXPROCS
+          value: "6"
+        hpaSpec:
+          minReplicas: 1
+          maxReplicas: 5
+          metrics:
+          - resource:
+              name: cpu
+              targetAverageUtilization: 80
+            type: Resource
+          scaleTargetRef:
+            apiVersion: apps/v1
+            kind: Deployment
+            name: istio-telemetry
+        resources:
+          limits:
+            cpu: 4800m
+            memory: 4G
+          requests:
+            cpu: 1000m 
+            memory: 1G 
+        strategy:
+          rollingUpdate:
+            maxSurge: 100%
+            maxUnavailable: 25%
+  hub: docker.io/istio
+  profile: empty
+  tag: 1.5.4
+  values:
+    clusterResources: true
+    gateways:
+      istio-egressgateway:
+        autoscaleEnabled: true
+        name: istio-egressgateway
+        secretVolumes:
+        - mountPath: /etc/istio/egressgateway-certs
+          name: egressgateway-certs
+          secretName: istio-egressgateway-certs
+        - mountPath: /etc/istio/egressgateway-ca-certs
+          name: egressgateway-ca-certs
+          secretName: istio-egressgateway-ca-certs
+        type: ClusterIP
+      istio-ingressgateway:
+        applicationPorts: "" 
+        autoscaleEnabled: true
+        debug: info # Istio gateway log level
+        domain: ""
+        # This is for mesh expension, keeping false as not enabling meshexpension
+        #meshExpansionPorts:
+        #- name: tcp-pilot-grpc-tls
+        #  port: 15011
+        #  targetPort: 15011
+        #- name: tcp-istiod
+        #  port: 15012
+        #  targetPort: 15012
+        #- name: tcp-citadel-grpc-tls
+        #  port: 8060
+        #  targetPort: 8060
+        #- name: tcp-dns-tls
+        #  port: 853
+        #  targetPort: 853
+        name: istio-ingressgateway
+        # This will enable the proxy to citadel communication for fetching the certs, it will make sure envoy proxy will not restart while updating certs
+        sds:
+          enabled: true
+          image: node-agent-k8s
+          resources:
+            limits:
+              cpu: 2000m
+              memory: 1024Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+        secretVolumes:
+        - mountPath: /etc/istio/ingressgateway-certs
+          name: ingressgateway-certs
+          secretName: istio-ingressgateway-certs
+        - mountPath: /etc/istio/ingressgateway-ca-certs
+          name: ingressgateway-ca-certs
+          secretName: istio-ingressgateway-ca-certs
+        type: LoadBalancer
+        loadBalancerIP: <Add LB IP>
+        zvpn: # As it is false, Keeping default not found any info for this
+          enabled: false
+          suffix: global
+    global:
+      # This is for base architecture configuration for istio
+      arch:
+        amd64: 2 # AMD64 processor
+        ppc64le: 2 #  enabling porting of the x86 Linux-based software with minimal effort
+        s390x: 2 # distinguish between the 31-bit and 64-bit Linux on Z kernels respectively
+      certificates: []
+      # This is enabled as it will do server side configuration validation
+      configValidation: true
+      controlPlaneSecurityEnabled: true # This will enable security for istio control-plane
+      defaultNodeSelector: {} # Not maintaining seperate node for istio, so no need to mention selector for node for istio component deployment
+      defaultPodDisruptionBudget: # It's PDB for istio pods for scheduling 
+        enabled: true
+      defaultResources: # This is default resource request count if not mentioned then this default value will apply
+        requests:
+          cpu: 100m
+      disablePolicyChecks: true # Depricated after v1.5, So disabling this feature
+      enableHelmTest: false #Keeping the default value, This is for helm, it will disable the helm test file generation when running helm command
+      enableTracing: true # Adding distributed tracing
+      imagePullPolicy: IfNotPresent 
+      imagePullSecrets: [] #This is required when we are keeping istio images in private repo, so here we will provide ACR secret for connectivity
+      istioNamespace: istio-system
+      istiod:  # Enabling this feature as we want to go with istiod instead of maintaining each component seperately
+        enabled: true
+      #jwtPolicy: third-party-jwt
+      k8sIngress: # Disabling this as we are not using custom gateway, istio-ingressgateway is enabled using gateways.enabled=true, which is present in above config
+        enableHttps: false #Enabling https traffic only, It will add 443 on ingress, Certificate is required for this if cert is not present then it will give LDS rejection
+        enabled: false
+        gatewayName: ingressgateway # Default Gateway for incoming traffic, you can define multiple gateway/Custom Gateway for traffic
+      localityLbSetting: # This configuration will specify, locality settings for kubernetes cluster to support multiple regions
+        enabled: true
+      logAsJson: true
+      logging: #Log Level for all config
+        level: default:info
+      meshExpansion: #Keeping with default values as it is not required.
+        enabled: false
+        useILB: false # This is for Internal LoadBalancer(istio-gateway), We havent created any internal istio gateway.
+      meshNetworks: {} # Need to discover, It's little complicated, keeping the default for now
+      mountMtlsCerts: true # This will mount the cert at /etc/certs/
+      mtls: #Enable MTLS
+        auto: true
+        enabled: true
+      multiCluster: # This feature is for multicluster pod communication with same istio control plane
+        clusterName: ""
+        enabled: false
+      network: "" #Keeping Default
+      omitSidecarInjectorConfigMap: false # Keeping false as want to keep configmap seperate for sidecar
+      oneNamespace: false # Namespaces which istio container look, if false then it will look all containers
+      operatorManageWebhooks: false # Keeping true as want to manage webhook from istiooperator, If false then istio-operator will not manage the webhook and component(Galley, Sidecar Injector) will manage their own webhook configuration
+      outboundTrafficPolicy: #outbound traffic to unknown destinations will be allowed
+        mode: ALLOW_ANY
+      pilotCertProvider: istiod
+      policyCheckFailOpen: false
+      priorityClassName: ""
+      proxy:
+        accessLogEncoding: JSON #Log Format for Istio-Proxy(Envoy Sidecar)
+        accessLogFile: "/dev/stdout" #File where you will save accesslogfile
+        accessLogFormat: "" # You will be able to specify specific format, which is suitable for your case, Make sure to add few pattern mentioned on istio site while using custom format as it is required for better network logs
+        autoInject: enabled # This controls the 'policy' in the sidecar injector
+        clusterDomain: cluster.local #DNS for cluster, using kubernetes cluster default dns for resolution
+        componentLogLevel: misc:error # This is loglevel for component, if keep blank then it will use global logLevel
+        concurrency: 2 # Keep this 2, make sure its not 0, it will consume cpu based on concurrent threads
+        dnsRefreshRate: 300s
+        enableCoreDump: false # This will generate coredump for sidecar envoy proxies, not required so keeping it false
+        # This is envoy sidecar setting to capture logs, metrics, stats
+        envoyAccessLogService:
+          enabled: false
+        envoyMetricsService:
+          enabled: false
+          tcpKeepalive:
+            interval: 10s
+            probes: 3
+            time: 10s
+          tlsSettings:
+            mode: PERMISSIVE
+            subjectAltNames: []
+        envoyStatsd:
+          enabled: false
+        excludeIPRanges: "" # Exclude traffic movement from Envoy Sidecar for mentioned ip ranges
+        excludeInboundPorts: "15020" # Exclude traffic movement from Envoy Sidecar for mentioned inbound ports
+        excludeOutboundPorts: "" # Exclude traffic movement from Envoy Sidecar for mentioned external ports
+        image: proxyv2 # Proxy init container image name
+        includeIPRanges: '' # Add IP Ranges for cluster,  This will Move traffic with Envoy Sidecar for mentioned ip ranges
+        includeInboundPorts: '*' # Move traffic with Envoy Sidecar for mentioned ports
+        kubevirtInterfaces: ""
+        logLevel: warning 
+        privileged: false # It's outdated
+        protocolDetectionTimeout: 200ms # Protocol detection timeout(http, tcp) for first bit send- Envoy intial connect wait time before timeout
+        readinessFailureThreshold: 30 #The number of successive failed probes before indicating readiness failure
+        readinessInitialDelaySeconds: 1 #The initial delay for readiness probes in seconds
+        readinessPeriodSeconds: 2 #The period between readiness probes retry
+        resources: # Resource limit for sidecar
+          limits:
+            cpu: 2000m
+            memory: 1024Mi
+          requests:
+            cpu: 100m # Old 500m
+            memory: 128Mi # Old 512 Mi
+        statusPort: 15020 #Default port for Pilot agent health checks. A value of 0 will disable health checking.
+        tracer: zipkin # Tracing for istio proxy
+      proxy_init:
+        image: proxyv2 #Base name for the istio-init container, used to configure iptables
+        resources:
+          limits:
+            cpu: 100m
+            memory: 50Mi
+          requests:
+            cpu: 10m
+            memory: 10Mi
+      sds:
+        enabled: true #IF set to true, mTLS certificates for the sidecars will be distributed through the SecretDiscoveryService instead of using K8S secrets to mount the certificates
+        token:
+          aud: istio-ca # CN NAme for cert
+        udsPath: ""
+      sts:
+        servicePort: 0
+      tracer:
+        zipkin:
+          address: "jaeger-collector.jaeger:9411"
+      trustDomain: cluster.local
+      useMCP: false # Current values is true, Changed as per demo profile, keeping it false as it is moved under istiod and required to set as it will required for validationwebhook to see where galley is deployed, if its true then validationwebhook will think it is oustide istiod, As per the new version keeping galley outside means enabling this flag create failures related to galley processing so not recomended.
+    mixer:
+      adapters:
+        kubernetesenv:
+          enabled: true
+        prometheus:
+          enabled: true
+          metricsExpiryDuration: 10m
+        stackdriver:
+          auth:
+            apiKey: ""
+            appCredentials: false
+            serviceAccountPath: ""
+          enabled: false
+          tracer:
+            enabled: false
+            sampleProbability: 1
+        stdio:
+          enabled: false
+          outputAsJson: false
+        useAdapterCRDs: false
+      policy:
+        adapters:
+          kubernetesenv:
+            enabled: true
+          useAdapterCRDs: false
+        autoscaleEnabled: true
+        image: mixer
+        sessionAffinityEnabled: false
+      telemetry:
+        autoscaleEnabled: true
+        env:
+          GOMAXPROCS: "6"
+        image: mixer
+        loadshedding:
+          latencyThreshold: 100ms
+          mode: enforce
+        nodeSelector: {}
+        podAntiAffinityLabelSelector: []
+        podAntiAffinityTermLabelSelector: []
+        reportBatchMaxEntries: 100
+        reportBatchMaxTime: 1s
+        sessionAffinityEnabled: false
+        tolerations: []
+    nodeagent:
+      image: node-agent-k8s
+    pilot:
+      appNamespaces: []
+      autoscaleEnabled: true
+      autoscaleMax: 5
+      autoscaleMin: 3
+      configMap: true
+      configNamespace: istio-config
+      cpu:
+        targetAverageUtilization: 80
+      # This for HTTP/HTTP2 traffic protocol for enabling/disabling
+      enableProtocolSniffingForInbound: false 
+      enableProtocolSniffingForOutbound: true
+      env: {}
+      image: pilot
+      ingress:
+        ingressClass: istio
+        ingressControllerMode: STRICT # https://istio.io/latest/docs/reference/config/istio.mesh.v1alpha1/#MeshConfig-IngressControllerMode
+        ingressService: istio-ingressgateway
+      keepaliveMaxServerConnectionAge: 30m
+      # Keeping default, More detail- https://istio.io/latest/docs/reference/config/istio.mesh.v1alpha1/ -> MeshNetworks
+      meshNetworks:
+        networks: {}
+      nodeSelector: {} # Note needed
+      podAntiAffinityLabelSelector: []
+      podAntiAffinityTermLabelSelector: []
+      policy:
+        enabled: false #Changed as per demo profile, current value is true
+      replicaCount: 1
+      tolerations: []
+      traceSampling: 1 # Recomended to have 1 it will increase performance
+
+    security:
+      dnsCerts:
+        istio-pilot-service-account.istio-control: istio-pilot.istio-control
+      enableNamespacesByDefault: true #determines whether namespaces without the ca.istio.io/env and ca.istio.io/override labels should be targeted by the Citadel instance for secret creation
+      image: citadel
+      selfSigned: true
+    # This is for istio envoy proxy injection in pods  
+    sidecarInjectorWebhook:
+      enableNamespacesByDefault: false # This will check in which namespace need to install istio-proxy(envoy), If disable then it will install proxy in istio-injection namespace only, as mentioned below
+      image: sidecar_injector
+      injectLabel: istio-injection # Label to check while injecting
+      objectSelector:
+        autoInject: true # Enabled so it will inject automatically
+        enabled: false
+      rewriteAppHTTPProbe: true #If true, webhook or istioctl injector will rewrite PodSpec for liveness health check to redirect request to sidecar. This makes liveness check work even when mTLS is enabled.
+      selfSigned: true # Using self signed certs for envoy proxy
+    telemetry:
+      enabled: true
+      v1:
+        enabled: false
+      v2:
+        enabled: true
+        prometheus:
+          enabled: true
+        stackdriver:
+          configOverride: {}
+          enabled: false
+          logging: false
+          monitoring: false
+          topology: false
+          
+          
+# Addon Components
+    grafana:
+      accessMode: ReadWriteMany # Grafana access mode
+      contextPath: /grafana # Grafana data context path
+      dashboardProviders:
+        dashboardproviders.yaml:
+          apiVersion: 1
+          providers:
+          - disableDeletion: false # You can enable and this will disable the deletion from grafana for dashboards
+            folder: istio
+            name: istio
+            options:
+              path: /var/lib/grafana/dashboards/istio # Dashboard storage location
+            orgId: 1
+            type: file
+      datasources:
+        datasources.yaml:
+          apiVersion: 1
+      env: {}
+      envSecrets: {}
+      image:
+        repository: grafana/grafana
+        tag: 6.5.2
+      ingress:
+        enabled: false
+        hosts:
+        - grafana.local
+      nodeSelector: {}
+      persist: false
+      podAntiAffinityLabelSelector: []
+      podAntiAffinityTermLabelSelector: []
+      security:
+        enabled: false
+        passphraseKey: passphrase # Password
+        secretName: grafana # Secret for credentials
+        usernameKey: username # Username
+      service: # Service details
+        annotations: {}
+        externalPort: 3000
+        name: http
+        type: ClusterIP
+      storageClassName: ""
+      tolerations: []
+    kiali:
+      contextPath: /kiali
+      createDemoSecret: true
+      dashboard:
+        grafanaInClusterURL: http://grafana.istio-system:3000
+        jaegerInClusterURL: http://jaeger-query.jaeger/jaeger
+        passphraseKey: passphrase
+        secretName: kiali
+        usernameKey: username
+        viewOnlyMode: false
+      hub: quay.io/kiali
+      ingress:
+        enabled: false
+        hosts:
+        - kiali.local
+      nodeSelector: {}
+      podAntiAffinityLabelSelector: []
+      podAntiAffinityTermLabelSelector: []
+      security:
+        cert_file: /kiali-cert/cert-chain.pem
+        enabled: false
+        private_key_file: /kiali-cert/key.pem
+      tag: v1.15      
+    prometheus:
+      contextPath: /prometheus
+      hub: docker.io/prom
+      ingress:
+        enabled: false
+        hosts:
+        - prometheus.local
+      nodeSelector: {}
+      podAntiAffinityLabelSelector: []
+      podAntiAffinityTermLabelSelector: []
+      provisionPrometheusCert: true
+      retention: 6d
+      scrapeInterval: 15s
+      security:
+        enabled: true
+      tag: v2.15.1
+      tolerations: []
+    # This for default istio tracing
+    #tracing:
+    #  ingress:
+    #    enabled: true
+    #  jaeger:
+    #    accessMode: ReadWriteMany
+    #    hub: docker.io/jaegertracing
+    #    memory:
+    #      max_traces: 50000
+    #    persist: false
+    #    spanStorageType: badger
+    #    storageClassName: ""
+    #    tag: "1.16"
+    #  nodeSelector: {}
+    #  opencensus:
+    #    exporters:
+    #      stackdriver:
+    #        enable_tracing: true
+    #    hub: docker.io/omnition
+    #    resources:
+    #      limits:
+    #        cpu: "1"
+    #        memory: 2Gi
+    #      requests:
+    #        cpu: 200m
+    #        memory: 400Mi
+    #    tag: 0.1.9
+    #  podAntiAffinityLabelSelector: []
+    #  podAntiAffinityTermLabelSelector: []
+    #  provider: jaeger
+    #  service:
+    #    annotations: {}
+    #    externalPort: 9411
+    #    name: http-query
+    #    type: ClusterIP
+    #  zipkin:
+    #    hub: docker.io/openzipkin
+    #    javaOptsHeap: 700
+    #    maxSpans: 500000
+    #    node:
+    #      cpus: 2
+    #    probeStartupDelay: 200
+    #    queryPort: 9411
+    #    resources:
+    #      limits:
+    #        cpu: 300m
+    #        memory: 900Mi
+    #      requests:
+    #        cpu: 150m
+    #        memory: 900Mi
+    #    tag: 2.14.2
+    #version: ""
+

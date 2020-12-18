@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: istio-ingressgateway
+  namespace: istio-system
+  labels:
+    operator.istio.io/component: IngressGateways
+    operator.istio.io/managed: Reconcile
+    operator.istio.io/version: 1.5.4
+    release: istio
+spec:
+  servers:
+    - hosts:
+        - '*.svc.cluster.local'
+      port:
+        name: http
+        number: 80
+        protocol: HTTP
+  selector:
+    app: istio-ingressgateway
+    istio: ingressgateway

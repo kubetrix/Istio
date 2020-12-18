@@ -1,0 +1,62 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jaeger-cassandra-schema
+  labels:
+    app.kubernetes.io/name: jaeger
+    helm.sh/chart: jaeger-0.17.4
+    app.kubernetes.io/instance: jaeger
+    app.kubernetes.io/managed-by: Tiller
+    app.kubernetes.io/component: cassandra-schema
+---
+# Source: jaeger/templates/cassandra-schema-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jaeger-cassandra-schema
+  labels:
+    app.kubernetes.io/name: jaeger
+    helm.sh/chart: jaeger-0.17.4
+    app.kubernetes.io/component: cassandra-schema
+    app.kubernetes.io/managed-by: Tiller
+    app.kubernetes.io/instance: jaeger
+spec:
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      name: jaeger-cassandra-schema
+    spec:
+      serviceAccountName: jaeger-cassandra-schema
+      containers:
+      - name: jaeger-cassandra-schema
+        image: jaegertracing/jaeger-cassandra-schema:1.15.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: CQLSH_HOST
+          value: jaeger-cassandra        
+        - name: MODE
+          value: "prod"
+        - name: DATACENTER
+          value: "dc1"
+        - name: CASSANDRA_PORT
+          value: "9042"
+        - name: TRACE_TTL
+          value: "86400"
+        - name: DEPENDENCIES_TTL
+          value: "86400"
+        - name: REPLICATION_FACTOR
+          value: "2"
+        - name: CASSANDRA_USERNAME
+          value: user
+        - name: CASSANDRA_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: jaeger-cassandra
+              key: password
+        resources:
+          {}
+          
+        volumeMounts:
+      restartPolicy: OnFailure
+      volumes:
